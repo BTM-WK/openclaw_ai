@@ -1,0 +1,30 @@
+# OPENCLAW AI - Ignore Files
+__pycache__/
+*.pyc
+*.log
+bot.log
+_t.py
+*.lnk
+fix_lid.ps1
+kill_all.ps1
+test_start.py
+register_startup.ps1
+_deploy_v2.py
+patch_*.py
+squad_patch.py
+group_id.json
+
+# Large binaries
+*.exe
+*.msi
+*.zip
+usb_deploy/
+
+# Secrets
+bot/.webui_secret_key
+bot/config.json
+config.json
+.env
+
+# Backups (may contain old keys)
+backup/
