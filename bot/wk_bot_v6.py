@@ -283,11 +283,13 @@ async def scheduler_loop(app):
                     await app.bot.send_message(chat_id=OWNER_CHAT_ID, text=reporter_obj.save_report())
                     reporter_obj.last_report_time = datetime.now(); reporter_obj.send_gmail_report()
                 except Exception as e: logger.error(f"Report failed: {e}")
-            if worker.is_running and not worker.is_paused and reporter_obj.check_stall(STALL_TIMEOUT):
-                logger.warning(f"STALL: no output {STALL_TIMEOUT}+ min")
-                if OWNER_CHAT_ID:
-                    try: await app.bot.send_message(chat_id=OWNER_CHAT_ID, text=f"[STALL] {BOT_NAME}: No output {STALL_TIMEOUT}+ min")
-                    except: pass
+            if worker.is_running and not worker.is_paused and task_mgr.has_active_goal() and reporter_obj.check_stall(STALL_TIMEOUT):
+                if not hasattr(scheduler_loop, "_last_stall") or (datetime.now() - scheduler_loop._last_stall).total_seconds() > 600:
+                    scheduler_loop._last_stall = datetime.now()
+                    logger.warning(f"STALL: no output {STALL_TIMEOUT}+ min")
+                    if OWNER_CHAT_ID:
+                        try: await app.bot.send_message(chat_id=OWNER_CHAT_ID, text=f"[STALL] {BOT_NAME}: No output {STALL_TIMEOUT}+ min")
+                        except: pass
         except asyncio.CancelledError: break
         except Exception as e: logger.error(f"Scheduler: {e}"); await asyncio.sleep(30)
 
