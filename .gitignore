@@ -1,0 +1,23 @@
+# OPENCLAW AI - Ignore Files
+__pycache__/
+*.pyc
+*.log
+bot.log
+_t.py
+*.lnk
+*.exe
+config.json
+backup/
+workspace/
+logs/
+jobs/
+reports/
+*.bat.bak
+deploy_*.txt
+out.txt
+check*.py
+_deploy*.py
+setup_*.py
+install_*.py
+install_*.bat
+python-*.exe
