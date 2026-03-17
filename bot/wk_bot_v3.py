@@ -1,7 +1,7 @@
 # ============================================================
-# OPENCLAW AI Unit - STANDARD BOT v3.2 (Team-Aware + Cross-Memory)
+# OPENCLAW AI Unit - STANDARD BOT v3.3 (Team Relay)
 # Model: Claude Sonnet 4.6
-# v3.2 FIX: @mention entity, asyncio nesting, bot username auto-detect
+# v3.3: Bot-to-bot DM relay for group message sharing
 # ============================================================
 import os, sys, json, subprocess, platform, psutil, asyncio, logging
 import fnmatch, shutil, urllib.request, urllib.parse, re, base64
@@ -11,7 +11,7 @@ from collections import deque
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
-from telegram import Update
+from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import anthropic
 
@@ -33,6 +33,8 @@ BASE_DIR = os.path.dirname(SCRIPT_DIR)
 WORKSPACE = CFG.get("workspace", os.path.join(BASE_DIR, "workspace"))
 LOG_DIR = CFG.get("log_dir", os.path.join(BASE_DIR, "logs"))
 MODEL = "claude-sonnet-4-6"
+TEAM_BOT_IDS = CFG.get("team_bot_ids", {})
+RELAY_TAG = "[RELAY]"
 
 TEAM_ROSTER = {"WK\uc720\ube44":"\uc804\ub7b5/\uae30\ud68d","WK\uad00\uc6b0":"\uc2e4\ud589/\uacf5\uaca9","WK\uacf5\uba85":"\ubd84\uc11d/\ucc38\ubaa8","WK\uc7a5\ube44":"\ub3cc\ud30c/\uac1c\ubc1c","WK\uc790\ub8e1":"\uc815\ucc30/\ud0d0\uc0c9","WK\uc911\ub2ec":"\uacac\uc81c/\ub300\uc548","WK\ubc29\ud1b5":"\ub9ac\ub354/\ucd1d\uad04","WK\uc5d0\uc774\ud2b8":"\uc9c0\uc6d0/\ubcf4\uc870","WK\uc81c\uc774\uc2a8":"\ud0d0\ud5d8/\uc2e4\ud5d8","WK\ube44\ub108\uc2a4":"\ucc3d\uc758/\ub514\uc790\uc778","WK\ud5ec\ub808\ub098":"\uc804\ub7b5/\uc678\uad50"}
 
@@ -42,7 +44,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(BOT_NAME)
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 BOT_USERNAME = ""
-
 dm_history = {}; group_history = {}; dm_activity_log = deque(maxlen=30)
 GROUP_HISTORY_MAX = 50; DM_HISTORY_MAX = 20
 
@@ -57,6 +58,18 @@ def log_dm_activity(user, msg, resp):
     dm_activity_log.append(f"{datetime.now().strftime('%H:%M')} [DM] {user}: {msg[:80] if isinstance(msg,str) else '(media)'} -> {resp[:120]}")
 def get_dm_activity_summary(n=15):
     return "\n".join(list(dm_activity_log)[-n:]) if dm_activity_log else ""
+
+async def broadcast_to_team(bot, sender_name, message_text):
+    if not TEAM_BOT_IDS: return
+    short_msg = message_text[:500]
+    relay_text = f"{RELAY_TAG} [{sender_name}] {short_msg}"
+    sent = 0
+    for name, bot_id in TEAM_BOT_IDS.items():
+        try:
+            await bot.send_message(chat_id=bot_id, text=relay_text)
+            sent += 1; await asyncio.sleep(0.15)
+        except Exception as e: logger.debug(f"Relay to {name}({bot_id}) failed: {e}")
+    if sent > 0: logger.info(f"[RELAY SENT] {sender_name}'s msg relayed to {sent} bots")
 
 def build_system_prompt(is_group=False, chat_id=None):
     team_info = "\n".join([f"  - {n}: {r}" for n, r in TEAM_ROSTER.items()])
@@ -112,7 +125,7 @@ def execute_tool(name, inp):
             return (r.stdout+r.stderr)[:4000] or "(no output)"
         elif name == "system_info":
             ram=psutil.virtual_memory(); dp=BASE_DIR[:3]; disk=psutil.disk_usage(dp)
-            return f"OS:{platform.platform()}\nCPU:{platform.processor()}\nRAM:{ram.total//(1024**3)}GB/{ram.available//(1024**3)}GB free\nDisk({dp}):{disk.total//(1024**3)}GB/{disk.free//(1024**3)}GB free\nBot:{BOT_NAME} v3.2\nModel:{MODEL}\nPath:{BASE_DIR}\nTime:{datetime.now()}"
+            return f"OS:{platform.platform()}\nCPU:{platform.processor()}\nRAM:{ram.total//(1024**3)}GB/{ram.available//(1024**3)}GB free\nDisk({dp}):{disk.total//(1024**3)}GB/{disk.free//(1024**3)}GB free\nBot:{BOT_NAME} v3.3\nModel:{MODEL}\nRelay:{len(TEAM_BOT_IDS)} bots\nTime:{datetime.now()}"
         elif name == "search_files":
             m = []
             for root,_,files in os.walk(inp["path"]):
@@ -190,12 +203,12 @@ def get_sender_display_name(update):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g=update.effective_chat.type in ["group","supergroup"]
-    if g: await update.message.reply_text(f"\U0001f396\ufe0f {BOT_NAME} v3.2 \ucd9c\uc11d!\n\uc5ed\ud560: {BOT_ROLE}\nModel: Sonnet 4.6")
-    else: await update.message.reply_text(f"{BOT_NAME} v3.2 ready!\nOPENCLAW AI | {BOT_ROLE}\nModel: Sonnet 4.6")
+    if g: await update.message.reply_text(f"\U0001f396\ufe0f {BOT_NAME} v3.3 \ucd9c\uc11d!\n\uc5ed\ud560: {BOT_ROLE}\nModel: Sonnet 4.6\nRelay: {len(TEAM_BOT_IDS)} bots")
+    else: await update.message.reply_text(f"{BOT_NAME} v3.3 ready!\nOPENCLAW AI | {BOT_ROLE}\nModel: Sonnet 4.6 | Relay: {len(TEAM_BOT_IDS)}")
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info=execute_tool("system_info",{})
-    await update.message.reply_text(f"=== {BOT_NAME} v3.2 ===\nRole: {BOT_ROLE}\nModel: {MODEL}\n@{BOT_USERNAME}\nGroup:{len(group_history)} DM:{len(dm_history)} Log:{len(dm_activity_log)}\n---\n{info}")
+    await update.message.reply_text(f"=== {BOT_NAME} v3.3 ===\nRole: {BOT_ROLE}\nModel: {MODEL}\n@{BOT_USERNAME}\nGroup:{len(group_history)} DM:{len(dm_history)} Log:{len(dm_activity_log)}\nRelay: {len(TEAM_BOT_IDS)} bots\n---\n{info}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message: return
@@ -203,6 +216,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id=str(update.effective_chat.id); user_id=str(update.effective_user.id)
     sender_name=get_sender_display_name(update)
     msg_text=update.message.text or update.message.caption or ""
+
+    # v3.3: RELAY message - store only, NO response
+    if not is_group and msg_text.startswith(RELAY_TAG):
+        relay_content = msg_text[len(RELAY_TAG):].strip()
+        for gid in group_history:
+            get_group_history(gid).append(f"{datetime.now().strftime('%H:%M')} {relay_content}")
+        if not group_history:
+            add_to_group_history("relay", "teammate", relay_content)
+        logger.info(f"[RELAY RECV] {relay_content[:80]}")
+        return
+
     image_data=None
     if update.message.photo:
         try:
@@ -223,6 +247,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             loop=asyncio.get_event_loop()
             resp=await loop.run_in_executor(None,lambda:chat_with_claude_sync(user_id,claude_msg,is_group=True,chat_id=chat_id,sender_name=sender_name))
             add_to_group_history(chat_id,BOT_NAME,resp[:200])
+            await broadcast_to_team(context.bot, BOT_NAME, resp[:500])
             if len(resp)>4000:
                 for i in range(0,len(resp),4000): await update.message.reply_text(resp[i:i+4000])
             else: await update.message.reply_text(resp)
@@ -247,14 +272,15 @@ async def post_init(application):
     logger.info(f"Bot username: @{BOT_USERNAME}")
     if BOT_USERNAME and BOT_USERNAME.lower() not in [n.lower() for n in MY_NAMES]: MY_NAMES.append(BOT_USERNAME.lower())
     logger.info(f"Trigger names: {MY_NAMES}")
+    logger.info(f"Relay targets: {list(TEAM_BOT_IDS.keys())}")
 
 def main():
-    logger.info(f"Starting {BOT_NAME} v3.2 [Sonnet 4.6 | CROSS-MEMORY]...")
-    logger.info(f"Model: {MODEL} | Base: {BASE_DIR}")
+    logger.info(f"Starting {BOT_NAME} v3.3 [Sonnet 4.6 | TEAM RELAY]...")
+    logger.info(f"Model: {MODEL} | Base: {BASE_DIR} | Relay: {len(TEAM_BOT_IDS)} bots")
     app=Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start",start)); app.add_handler(CommandHandler("status",status))
     app.add_handler(MessageHandler((filters.TEXT|filters.PHOTO)&~filters.COMMAND,handle_message))
-    logger.info(f"{BOT_NAME} v3.2 running!")
+    logger.info(f"{BOT_NAME} v3.3 running!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__=="__main__": main()
