@@ -1,7 +1,7 @@
 # ============================================================
-# OPENCLAW AI Unit - STANDARD BOT v3.3 (Team Relay)
+# OPENCLAW AI Unit - STANDARD BOT v3.4 (Remote Prompt Update)
 # Model: Claude Sonnet 4.6
-# v3.3: Bot-to-bot DM relay for group message sharing
+# v3.4: /setprompt 명령으로 원격 system_prompt 업데이트 지원
 # ============================================================
 import os, sys, json, subprocess, platform, psutil, asyncio, logging
 import fnmatch, shutil, urllib.request, urllib.parse, re, base64
@@ -20,6 +20,17 @@ def load_config():
     if not os.path.exists(CONFIG_PATH):
         print(f"ERROR: config.json not found at {CONFIG_PATH}"); sys.exit(1)
     with open(CONFIG_PATH, 'r', encoding='utf-8') as f: return json.load(f)
+
+def save_config(cfg):
+    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+def get_custom_prompt():
+    """config.json에서 system_prompt를 항상 최신으로 읽음 (재시작 불필요)"""
+    try:
+        with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f).get("system_prompt", "")
+    except: return ""
 
 CFG = load_config()
 TELEGRAM_TOKEN = CFG["telegram_token"]
@@ -73,7 +84,28 @@ async def broadcast_to_team(bot, sender_name, message_text):
 
 def build_system_prompt(is_group=False, chat_id=None):
     team_info = "\n".join([f"  - {n}: {r}" for n, r in TEAM_ROSTER.items()])
-    base = f"You are {BOT_NAME}, an autonomous AI agent in OPENCLAW AI unit (WK_AI\uc804\ub7b5\ub2e8).\nRole: {BOT_ROLE}\nLeader: {LEADER_NAME}\n\n[Team]\n{team_info}\n\n[Rules]\n- Korean unless asked otherwise\n- Use tools autonomously\n- Workspace: {WORKSPACE}\n"
+
+    # ── 커스텀 프롬프트: config에서 매번 최신 읽기 ──
+    custom = get_custom_prompt()
+    if custom:
+        base = (
+            f"당신은 {BOT_NAME}입니다. WK AI전략단의 일원입니다.\n\n"
+            f"[나의 역할 및 정체성]\n{custom}\n\n"
+            f"[팀 구성]\n{team_info}\n\n"
+            f"[기본 원칙]\n"
+            f"- 항상 한국어로 답변\n"
+            f"- 도구를 자율적으로 활용\n"
+            f"- Workspace: {WORKSPACE}\n"
+        )
+    else:
+        # 커스텀 프롬프트 없을 때 기존 기본값
+        base = (
+            f"You are {BOT_NAME}, an autonomous AI agent in OPENCLAW AI unit (WK_AI전략단).\n"
+            f"Role: {BOT_ROLE}\nLeader: {LEADER_NAME}\n\n"
+            f"[Team]\n{team_info}\n\n"
+            f"[Rules]\n- Korean unless asked otherwise\n- Use tools autonomously\n- Workspace: {WORKSPACE}\n"
+        )
+
     if is_group and chat_id:
         ds = get_dm_activity_summary()
         if ds: base += f"\n[My DM Activity]\n---\n{ds}\n---\n"
@@ -203,8 +235,67 @@ def get_sender_display_name(update):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g=update.effective_chat.type in ["group","supergroup"]
-    if g: await update.message.reply_text(f"\U0001f396\ufe0f {BOT_NAME} v3.3 \ucd9c\uc11d!\n\uc5ed\ud560: {BOT_ROLE}\nModel: Sonnet 4.6\nRelay: {len(TEAM_BOT_IDS)} bots")
-    else: await update.message.reply_text(f"{BOT_NAME} v3.3 ready!\nOPENCLAW AI | {BOT_ROLE}\nModel: Sonnet 4.6 | Relay: {len(TEAM_BOT_IDS)}")
+    custom = get_custom_prompt()
+    prompt_status = "✅ 커스텀 프롬프트 적용 중" if custom else "⬜ 기본 프롬프트 사용 중"
+    if g: await update.message.reply_text(f"🏅 {BOT_NAME} v3.4 출석!\n역할: {BOT_ROLE}\nModel: Sonnet 4.6\n{prompt_status}")
+    else: await update.message.reply_text(f"{BOT_NAME} v3.4 ready!\nOPENCLAW AI | {BOT_ROLE}\nModel: Sonnet 4.6\n{prompt_status}")
+
+async def setprompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    원격으로 system_prompt 업데이트.
+    사용법: /setprompt 너는 WK마케팅그룹의 콘텐츠 전문가다...
+    /setprompt clear  → 커스텀 프롬프트 초기화
+    /setprompt show   → 현재 프롬프트 확인
+    """
+    user_id = str(update.effective_user.id)
+    owner_id = str(CFG.get("owner_chat_id", ""))
+    # 권한 체크: 대표님 또는 유비(사령관)만 가능 — DM/그룹 모두 허용
+    allowed_ids = [owner_id, "8622440190"]  # 대표님 chat_id, WK방통 chat_id
+    if owner_id and user_id not in allowed_ids:
+        await update.message.reply_text("❌ 권한 없음. 대표님 또는 사령관만 프롬프트를 변경할 수 있습니다.")
+        return
+
+    args = update.message.text.split(" ", 1)
+    if len(args) < 2:
+        current = get_custom_prompt()
+        await update.message.reply_text(
+            f"사용법:\n"
+            f"  /setprompt [내용] — 새 프롬프트 설정\n"
+            f"  /setprompt clear  — 초기화\n"
+            f"  /setprompt show   — 현재 확인\n\n"
+            f"현재: {'설정됨 (' + str(len(current)) + '자)' if current else '없음 (기본값 사용)'}"
+        )
+        return
+
+    command = args[1].strip()
+
+    if command.lower() == "clear":
+        cfg = load_config()
+        cfg["system_prompt"] = ""
+        save_config(cfg)
+        await update.message.reply_text(f"🗑️ {BOT_NAME} 프롬프트 초기화 완료.\n다음 대화부터 기본 프롬프트 적용.")
+        logger.info(f"[PROMPT] system_prompt cleared by {user_id}")
+        return
+
+    if command.lower() == "show":
+        current = get_custom_prompt()
+        if current:
+            await update.message.reply_text(f"📋 현재 {BOT_NAME} 프롬프트:\n\n{current[:1000]}{'...(생략)' if len(current)>1000 else ''}")
+        else:
+            await update.message.reply_text("⬜ 커스텀 프롬프트 없음. 기본 프롬프트 사용 중.")
+        return
+
+    # 새 프롬프트 저장
+    cfg = load_config()
+    cfg["system_prompt"] = command
+    save_config(cfg)
+    logger.info(f"[PROMPT] system_prompt updated ({len(command)}자) by {user_id}")
+    await update.message.reply_text(
+        f"✅ {BOT_NAME} 프롬프트 업데이트 완료!\n"
+        f"길이: {len(command)}자\n"
+        f"다음 대화부터 즉시 적용됩니다. (재시작 불필요)\n\n"
+        f"미리보기:\n{command[:200]}{'...' if len(command)>200 else ''}"
+    )
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info=execute_tool("system_info",{})
@@ -278,7 +369,9 @@ def main():
     logger.info(f"Starting {BOT_NAME} v3.3 [Sonnet 4.6 | TEAM RELAY]...")
     logger.info(f"Model: {MODEL} | Base: {BASE_DIR} | Relay: {len(TEAM_BOT_IDS)} bots")
     app=Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
-    app.add_handler(CommandHandler("start",start)); app.add_handler(CommandHandler("status",status))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("status", status))
+    app.add_handler(CommandHandler("setprompt", setprompt))
     app.add_handler(MessageHandler((filters.TEXT|filters.PHOTO)&~filters.COMMAND,handle_message))
     logger.info(f"{BOT_NAME} v3.3 running!")
     app.run_polling(drop_pending_updates=True)
