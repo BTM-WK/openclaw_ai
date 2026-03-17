@@ -21,3 +21,6 @@ setup_*.py
 install_*.py
 install_*.bat
 python-*.exe
+usb_deploy/
+patch_*.py
+test_*.py
