@@ -1,6 +1,7 @@
 # ============================================================
-# OPENCLAW AI Unit - STANDARD BOT v3.4 (Remote Prompt Update)
+# OPENCLAW AI Unit - STANDARD BOT v3.5 (Leader Command + Smart Response)
 # Model: Claude Sonnet 4.6
+# v3.5: 리더/대표 메시지 전원반응 + 특정봇 지정시 해당봇만 응답
 # v3.4: /setprompt 명령으로 원격 system_prompt 업데이트 지원
 # ============================================================
 import os, sys, json, subprocess, platform, psutil, asyncio, logging
@@ -45,6 +46,9 @@ WORKSPACE = CFG.get("workspace", os.path.join(BASE_DIR, "workspace"))
 LOG_DIR = CFG.get("log_dir", os.path.join(BASE_DIR, "logs"))
 MODEL = "claude-sonnet-4-6"
 TEAM_BOT_IDS = CFG.get("team_bot_ids", {})
+OWNER_CHAT_ID = str(CFG.get("owner_chat_id", ""))
+LEADER_BOT_IDS = [str(v) for k,v in TEAM_BOT_IDS.items() if k == LEADER_NAME]
+ALL_BOT_IDS = [str(v) for v in TEAM_BOT_IDS.values()]
 RELAY_TAG = "[RELAY]"
 
 TEAM_ROSTER = {"WK\uc720\ube44":"\uc804\ub7b5/\uae30\ud68d","WK\uad00\uc6b0":"\uc2e4\ud589/\uacf5\uaca9","WK\uacf5\uba85":"\ubd84\uc11d/\ucc38\ubaa8","WK\uc7a5\ube44":"\ub3cc\ud30c/\uac1c\ubc1c","WK\uc790\ub8e1":"\uc815\ucc30/\ud0d0\uc0c9","WK\uc911\ub2ec":"\uacac\uc81c/\ub300\uc548","WK\ubc29\ud1b5":"\ub9ac\ub354/\ucd1d\uad04","WK\uc5d0\uc774\ud2b8":"\uc9c0\uc6d0/\ubcf4\uc870","WK\uc81c\uc774\uc2a8":"\ud0d0\ud5d8/\uc2e4\ud5d8","WK\ube44\ub108\uc2a4":"\ucc3d\uc758/\ub514\uc790\uc778","WK\ud5ec\ub808\ub098":"\uc804\ub7b5/\uc678\uad50"}
@@ -157,7 +161,7 @@ def execute_tool(name, inp):
             return (r.stdout+r.stderr)[:4000] or "(no output)"
         elif name == "system_info":
             ram=psutil.virtual_memory(); dp=BASE_DIR[:3]; disk=psutil.disk_usage(dp)
-            return f"OS:{platform.platform()}\nCPU:{platform.processor()}\nRAM:{ram.total//(1024**3)}GB/{ram.available//(1024**3)}GB free\nDisk({dp}):{disk.total//(1024**3)}GB/{disk.free//(1024**3)}GB free\nBot:{BOT_NAME} v3.3\nModel:{MODEL}\nRelay:{len(TEAM_BOT_IDS)} bots\nTime:{datetime.now()}"
+            return f"OS:{platform.platform()}\nCPU:{platform.processor()}\nRAM:{ram.total//(1024**3)}GB/{ram.available//(1024**3)}GB free\nDisk({dp}):{disk.total//(1024**3)}GB/{disk.free//(1024**3)}GB free\nBot:{BOT_NAME} v3.5\nModel:{MODEL}\nRelay:{len(TEAM_BOT_IDS)} bots\nTime:{datetime.now()}"
         elif name == "search_files":
             m = []
             for root,_,files in os.walk(inp["path"]):
@@ -210,6 +214,10 @@ def should_respond_in_group(update):
     msg=update.message
     if not msg: return False,"no_msg"
     text=msg.text or msg.caption or ""; text_lower=text.lower()
+    sender_id = str(update.effective_user.id) if update.effective_user else ""
+    is_owner = (sender_id == OWNER_CHAT_ID) if OWNER_CHAT_ID else False
+    is_leader = sender_id in LEADER_BOT_IDS
+    is_bot_msg = sender_id in ALL_BOT_IDS
     if msg.entities:
         for e in msg.entities:
             if e.type=="mention":
@@ -223,6 +231,9 @@ def should_respond_in_group(update):
     for kw in ["\uc804\uccb4","\ubaa8\ub450","\ub2e4\ub4e4","\uc5ec\ub7ec\ubd84","all","@all"]:
         if kw in text_lower: return True,"all_called"
     if text_lower.startswith("/rollcall") or text_lower.startswith("/\uc810\ud638"): return True,"rollcall"
+    if is_owner: return True,"owner_msg"
+    if is_leader: return True,"leader_msg"
+    if is_bot_msg: return False,"bot_silent"
     return False,"silent"
 
 def get_sender_display_name(update):
@@ -237,8 +248,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     g=update.effective_chat.type in ["group","supergroup"]
     custom = get_custom_prompt()
     prompt_status = "✅ 커스텀 프롬프트 적용 중" if custom else "⬜ 기본 프롬프트 사용 중"
-    if g: await update.message.reply_text(f"🏅 {BOT_NAME} v3.4 출석!\n역할: {BOT_ROLE}\nModel: Sonnet 4.6\n{prompt_status}")
-    else: await update.message.reply_text(f"{BOT_NAME} v3.4 ready!\nOPENCLAW AI | {BOT_ROLE}\nModel: Sonnet 4.6\n{prompt_status}")
+    if g: await update.message.reply_text(f"🏅 {BOT_NAME} v3.5 출석!\n역할: {BOT_ROLE}\nModel: Sonnet 4.6\n{prompt_status}")
+    else: await update.message.reply_text(f"{BOT_NAME} v3.5 ready!\nOPENCLAW AI | {BOT_ROLE}\nModel: Sonnet 4.6\n{prompt_status}")
 
 async def setprompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
@@ -299,7 +310,7 @@ async def setprompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     info=execute_tool("system_info",{})
-    await update.message.reply_text(f"=== {BOT_NAME} v3.3 ===\nRole: {BOT_ROLE}\nModel: {MODEL}\n@{BOT_USERNAME}\nGroup:{len(group_history)} DM:{len(dm_history)} Log:{len(dm_activity_log)}\nRelay: {len(TEAM_BOT_IDS)} bots\n---\n{info}")
+    await update.message.reply_text(f"=== {BOT_NAME} v3.5 ===\nRole: {BOT_ROLE}\nModel: {MODEL}\n@{BOT_USERNAME}\nGroup:{len(group_history)} DM:{len(dm_history)} Log:{len(dm_activity_log)}\nRelay: {len(TEAM_BOT_IDS)} bots\n---\n{info}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message: return
@@ -366,14 +377,14 @@ async def post_init(application):
     logger.info(f"Relay targets: {list(TEAM_BOT_IDS.keys())}")
 
 def main():
-    logger.info(f"Starting {BOT_NAME} v3.3 [Sonnet 4.6 | TEAM RELAY]...")
+    logger.info(f"Starting {BOT_NAME} v3.5 [Sonnet 4.6 | LEADER CMD]...")
     logger.info(f"Model: {MODEL} | Base: {BASE_DIR} | Relay: {len(TEAM_BOT_IDS)} bots")
     app=Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("status", status))
     app.add_handler(CommandHandler("setprompt", setprompt))
     app.add_handler(MessageHandler((filters.TEXT|filters.PHOTO)&~filters.COMMAND,handle_message))
-    logger.info(f"{BOT_NAME} v3.3 running!")
+    logger.info(f"{BOT_NAME} v3.5 running!")
     app.run_polling(drop_pending_updates=True)
 
 if __name__=="__main__": main()
