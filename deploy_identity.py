@@ -2,16 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 OPENCLAW AI 삼국지 부대 Identity 자동 배포 스크립트
-각 PC에서 실행하면 해당 PC에 맞는 identity.md를 자동으로 배치합니다.
 
-사용법:
-python deploy_identity.py
-
-작동 원리:
+원격 배포 방법:
 1. GitHub에서 최신 identity_templates를 pull
-2. 현재 PC의 정보를 파악 (컴퓨터명, 경로 등)
-3. 해당하는 identity 파일을 ~/.openclaw/workspace/identity.md로 복사
-4. OpenClaw Gateway 재시작 (선택)
+2. 현재 PC 정보를 파악하여 해당 봇의 identity.md 배치
+3. OpenClaw Gateway 재시작
+
+사용법: python deploy_identity.py
 """
 
 import os
@@ -22,20 +19,22 @@ import subprocess
 import json
 from pathlib import Path
 
-# 봇별 PC 매핑 (컴퓨터명 기반)
+# 봇별 PC 매핑 (실제 컴퓨터명으로 업데이트 필요)
 BOT_MAPPING = {
-    # 실제 컴퓨터명으로 수정 필요
-    "DESKTOP-XXXXX": "bangtong",     # 집PC - WK방통
-    "WKMG-DESKTOP": "yubi",          # 회사PC - WK유비  
-    "LAPTOP-4": "gwanu",             # 4호기 - WK관우
-    "WKMG-NOTEBOOK": "gongmyeong",   # 회사노트북 - WK공명
-    "LAPTOP-PERSONAL": "jangbi",     # 개인노트북 - WK장비
-    "DESKTOP-10": "jaryong",         # 10호기 - WK자룡
-    "DESKTOP-9": "jungdal",          # 9호기 - WK중달
-    "DESKTOP-8": "eight",            # 8호기 - WK에이트
-    "DESKTOP-7": "jason",            # 7호기 - WK제이슨
-    "DESKTOP-5": "venus",            # 5호기 - WK비너스
-    "DESKTOP-2": "helena",           # 2호기 - WK헬레나
+    # 현재 확인된 PC
+    "": "bangtong",                    # 집PC - WK방통 (현재 PC)
+    
+    # 추정 매핑 (실제 컴퓨터명으로 수정 필요)
+    "WKMG-DESKTOP": "yubi",           # 회사PC - WK유비  
+    "DESKTOP-4": "gwanu",             # 4호기 - WK관우
+    "WKMG-NOTEBOOK": "gongmyeong",    # 회사노트북 - WK공명
+    "PERSONAL-LAPTOP": "jangbi",      # 개인노트북 - WK장비
+    "DESKTOP-10": "jaryong",          # 10호기 - WK자룡
+    "DESKTOP-9": "jungdal",           # 9호기 - WK중달
+    "DESKTOP-8": "eight",             # 8호기 - WK에이트
+    "DESKTOP-7": "jason",             # 7호기 - WK제이슨
+    "DESKTOP-5": "venus",             # 5호기 - WK비너스
+    "DESKTOP-2": "helena",            # 2호기 - WK헬레나
 }
 
 def get_computer_name():
@@ -96,28 +95,27 @@ def deploy_identity(bot_name):
 def restart_openclaw():
     """OpenClaw Gateway를 재시작한다"""
     try:
-        # Windows 환경에서 openclaw gateway 재시작
         print("🔄 OpenClaw Gateway 재시작 중...")
-        # 기존 프로세스 정리
+        # Windows에서 기존 프로세스 정리
         subprocess.run(['taskkill', '/F', '/IM', 'node.exe'], 
                       capture_output=True, timeout=10)
         
-        # 잠시 대기
         import time
         time.sleep(3)
         
         # 새로 시작 (백그라운드)
         subprocess.Popen(['openclaw', 'gateway', '--port', '18789'], 
-                        shell=True)
+                        shell=True, 
+                        creationflags=subprocess.CREATE_NEW_CONSOLE)
         print("✅ OpenClaw Gateway 재시작 완료")
         return True
     except Exception as e:
         print(f"❌ Gateway 재시작 실패: {e}")
-        print("수동으로 'openclaw gateway --port 18789' 실행해주세요")
+        print("💡 수동 재시작: openclaw gateway --port 18789")
         return False
 
 def main():
-    print("🚀 OPENCLAW AI 삼국지 부대 Identity 배포 시작")
+    print("🚀 OPENCLAW AI 삼국지 부대 Identity 배포")
     print("=" * 50)
     
     # 1. 현재 PC 정보 확인
@@ -127,41 +125,43 @@ def main():
     # 2. 봇 이름 매핑
     bot_name = BOT_MAPPING.get(computer_name)
     if not bot_name:
-        print(f"❌ 등록되지 않은 PC입니다: {computer_name}")
-        print("다음 중 해당하는 봇 이름을 선택하세요:")
-        for i, (pc, bot) in enumerate(BOT_MAPPING.items(), 1):
-            print(f"  {i}. {bot}")
+        print(f"❌ 등록되지 않은 PC: {computer_name}")
+        print("\n🤖 봇 선택:")
+        bot_list = list(BOT_MAPPING.values())
+        for i, bot in enumerate(bot_list, 1):
+            print(f"  {i}. WK{bot}")
         
         try:
-            choice = int(input("번호 입력: ")) - 1
-            bot_name = list(BOT_MAPPING.values())[choice]
+            choice = int(input("\n번호 입력: ")) - 1
+            bot_name = bot_list[choice]
         except (ValueError, IndexError):
-            print("❌ 잘못된 선택입니다.")
+            print("❌ 잘못된 선택")
             sys.exit(1)
     
-    print(f"🤖 배포 대상 봇: WK{bot_name}")
+    print(f"🤖 배포 대상: WK{bot_name}")
     
     # 3. Git pull 실행
+    print("\n🔄 GitHub에서 최신 업데이트 확인...")
     if not git_pull():
-        print("⚠️  Git pull 실패했지만 계속 진행...")
+        print("⚠️  Git pull 실패 - 로컬 파일로 진행")
     
     # 4. Identity 파일 배치
+    print(f"\n📁 {bot_name} identity 배치 중...")
     if deploy_identity(bot_name):
-        print("✅ Identity 배치 성공")
+        print("✅ Identity 배치 완료")
     else:
-        print("❌ Identity 배치 실패")
+        print("❌ 배치 실패")
         sys.exit(1)
     
-    # 5. Gateway 재시작 여부 확인
-    restart_choice = input("OpenClaw Gateway를 재시작할까요? (y/N): ").lower()
+    # 5. Gateway 재시작 선택
+    restart_choice = input("\n🔄 Gateway 재시작? (y/N): ").lower()
     if restart_choice in ['y', 'yes']:
         restart_openclaw()
     else:
-        print("ℹ️  수동으로 Gateway를 재시작해주세요: openclaw gateway --port 18789")
+        print("ℹ️  수동 재시작 필요: openclaw gateway --port 18789")
     
     print("=" * 50)
-    print("🎉 Identity 배포 완료!")
-    print("텔레그램에서 봇이 새로운 정체성으로 응답하는지 확인해보세요.")
+    print("🎉 배포 완료! 텔레그램에서 봇 응답을 확인하세요.")
 
 if __name__ == "__main__":
     main()
